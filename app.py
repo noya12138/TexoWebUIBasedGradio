@@ -175,7 +175,23 @@ def create_ui(app: TexoApp) -> gr.Blocks:
             with gr.Column():
                 out = gr.Textbox(label="LaTeX", lines=6, max_lines=6, show_copy_button=True, elem_classes=["output-box"], interactive=True, placeholder="识别结果...")
                 mathml_out = gr.Textbox(visible=False)
-                copy_word_btn = gr.Button("复制到 Word", size="sm")
+                with gr.Row():
+                    copy_latex_dd = gr.Dropdown(
+                        choices=["无特殊附加", "$ ... $ 格式", "$$ ... $$ 格式", r"\[ ... \] 格式", r"\( ... \) 格式", r"\begin{equation} ... \end{equation} 格式"],
+                        label="复制LaTeX",
+                        value=None,
+                        interactive=True,
+                        show_label=True,
+                        scale=1
+                    )
+                    copy_mathml_dd = gr.Dropdown(
+                        choices=["复制MathML(Word)", "复制AsciiMath", "复制Typst", "导出Docx(Word/WPS)"],
+                        label="复制MathML(Word)",
+                        value=None,
+                        interactive=True,
+                        show_label=True,
+                        scale=1
+                    )
                 preview = gr.Markdown(elem_classes=["preview-box"])
         gr.HTML(f'<div class="footer">{logo_html(16)} <a href="https://github.com/alephpi/Texo">GitHub</a> · AlephPi</div>')
 
@@ -185,9 +201,6 @@ def create_ui(app: TexoApp) -> gr.Blocks:
             try:
                 if latex and not latex.startswith("⚠️") and not latex.startswith("("):
                     mathml = latex2mathml.converter.convert(latex)
-                    # Fix for Word: Convert Sum/Prod operators to identifiers to avoid empty dashed boxes
-                    mathml = re.sub(r"<mo>(\s*(&#x02211;|&#8721;|∑)\s*)</mo>", r"<mi>\1</mi>", mathml)
-                    mathml = re.sub(r"<mo>(\s*(&#x0220F;|&#8719;|∏)\s*)</mo>", r"<mi>\1</mi>", mathml)
             except Exception as e:
                 logger.warning(f"MathML conversion failed: {e}")
             return latex, mathml
@@ -196,12 +209,6 @@ def create_ui(app: TexoApp) -> gr.Blocks:
             try:
                 if latex and not latex.startswith("⚠️") and not latex.startswith("("):
                     mathml = latex2mathml.converter.convert(latex)
-                    # Fix for Word: Convert Sum/Prod operators to identifiers to avoid empty dashed boxes
-                    # Word treats <mo>∑</mo> as an N-ary operator expecting a summand argument.
-                    # If the summand isn't grouped in the MathML (which latex2mathml doesn't do),
-                    # Word shows an empty placeholder. Changing to <mi> makes it a simple symbol.
-                    mathml = re.sub(r"<mo>(\s*(&#x02211;|&#8721;|∑)\s*)</mo>", r"<mi>\1</mi>", mathml)
-                    mathml = re.sub(r"<mo>(\s*(&#x0220F;|&#8719;|∏)\s*)</mo>", r"<mi>\1</mi>", mathml)
                     return mathml
             except Exception:
                 pass
@@ -212,21 +219,49 @@ def create_ui(app: TexoApp) -> gr.Blocks:
         out.change(render_latex, out, preview)
         out.change(update_mathml, out, mathml_out)
 
-        js_copy = """
-        (mathml) => {
-            if (!mathml) {
-                alert("没有可复制的内容");
-                return;
-            }
-            const blob = new Blob([mathml], {type: 'text/html'});
-            const item = new ClipboardItem({'text/html': blob});
-            navigator.clipboard.write([item]).then(
-                () => { alert("已复制 MathML，请在 Word 中直接粘贴"); },
-                (err) => { console.error("Failed to copy: ", err); alert("复制失败: " + err); }
+        js_copy_latex = r"""
+        (format, latex) => {
+            if (!format) return null;
+            if (!latex) { alert("没有可复制的内容"); return null; }
+            let text = latex;
+            if (format === "$ ... $ 格式") text = "$" + latex + "$";
+            else if (format === "$$ ... $$ 格式") text = "$$" + latex + "$$";
+            else if (format === "\\[ ... \\] 格式") text = "\\[" + latex + "\\]";
+            else if (format === "\\( ... \\) 格式") text = "\\(" + latex + "\\)";
+            else if (format === "\\begin{equation} ... \\end{equation} 格式") text = "\\begin{equation}\n" + latex + "\n\\end{equation}";
+            
+            navigator.clipboard.writeText(text).then(
+                () => { alert("已复制 LaTeX"); },
+                (err) => { alert("复制失败: " + err); }
             );
+            return null;
         }
         """
-        copy_word_btn.click(None, mathml_out, None, js=js_copy)
+        
+        js_copy_mathml = r"""
+        (action, mathml) => {
+            if (!action) return null;
+            if (action === "复制MathML(Word)") {
+                if (!mathml) { alert("没有可复制的内容"); return null; }
+                const blob = new Blob([mathml], {type: 'text/html'});
+                const item = new ClipboardItem({'text/html': blob});
+                navigator.clipboard.write([item]).then(
+                    () => { alert("已复制 MathML，请在 Word 中直接粘贴"); },
+                    (err) => { alert("复制失败: " + err); }
+                );
+            } else if (action === "复制AsciiMath") {
+                alert("暂不支持 AsciiMath");
+            } else if (action === "复制Typst") {
+                alert("暂不支持 Typst");
+            } else if (action === "导出Docx(Word/WPS)") {
+                alert("请先安装 python-docx 库以支持导出功能");
+            }
+            return null;
+        }
+        """
+        
+        copy_latex_dd.change(None, [copy_latex_dd, out], copy_latex_dd, js=js_copy_latex)
+        copy_mathml_dd.change(None, [copy_mathml_dd, mathml_out], copy_mathml_dd, js=js_copy_mathml)
 
     return demo
 
