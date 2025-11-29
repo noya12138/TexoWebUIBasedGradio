@@ -130,6 +130,12 @@ function copyLatex(format) {
     };
     if (formats[format]) text = formats[format];
     
+    const resultBox = document.querySelector('#conversion-result textarea');
+    if (resultBox) {
+        resultBox.value = text;
+        resultBox.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    
     navigator.clipboard.writeText(text).then(
         () => { showToast("已复制 LaTeX"); },
         (err) => { showToast("复制失败: " + err); }
@@ -138,8 +144,15 @@ function copyLatex(format) {
 
 function copyMathML(action) {
     if (action === "word") {
-        const mathml = getElementValue('mathml-output');
+        const mathml = getElementValue('mathml-storage');
         if (!mathml) { showToast("没有可复制的内容"); return; }
+        
+        const resultBox = document.querySelector('#conversion-result textarea');
+        if (resultBox) {
+            resultBox.value = mathml;
+            resultBox.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+
         const blob = new Blob([mathml], {type: 'text/html'});
         const item = new ClipboardItem({'text/html': blob});
         navigator.clipboard.write([item]).then(
@@ -176,11 +189,78 @@ def favicon() -> str:
         return ""
     return f'<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,{base64.b64encode(svg.encode()).decode()}">'
 
+def standardize_latex(text: str) -> str:
+    """标准化 LaTeX 命令 (修复 MathML 转换问题)."""
+    # 使用正则确保只替换完整的命令 (避免 \left 被替换为 \leqft)
+    def replace_command(text, old_cmd, new_cmd):
+        # 匹配 \old_cmd 且后面不跟字母
+        pattern = re.compile(re.escape(old_cmd) + r"(?![a-zA-Z])")
+        # 使用 lambda 避免 new_cmd 中的反斜杠被 re.sub 当作转义符处理
+        return pattern.sub(lambda m: new_cmd, text)
+
+    replacements = [
+        # 极限与算子
+        (r"\operatorname*{lim}", r"\lim"),
+        (r"\operatorname*{min}", r"\min"),
+        (r"\operatorname*{max}", r"\max"),
+        (r"\operatorname*{sup}", r"\sup"),
+        (r"\operatorname*{inf}", r"\inf"),
+        (r"\operatorname{lim}", r"\lim"),
+        (r"\operatorname{min}", r"\min"),
+        (r"\operatorname{max}", r"\max"),
+        (r"\operatorname{sup}", r"\sup"),
+        (r"\operatorname{inf}", r"\inf"),
+        
+        # 箭头与关系符
+        (r"\rarr", r"\to"),
+        (r"\infin", r"\infty"),
+        (r"\ge", r"\geq"),
+        (r"\le", r"\leq"),
+        (r"\gt", ">"),
+        (r"\lt", "<"),
+        
+        # 运算符号
+        (r"\cdotp", r"\cdot"),
+        (r"\lvert", "|"),
+        (r"\rvert", "|"),
+        (r"\lVert", "||"),
+        (r"\rVert", "||"),
+        
+        # 字体与修饰
+        (r"\Bbb", r"\mathbb"),
+        (r"\bold", r"\mathbf"),
+        (r"\rm", r"\mathrm"),
+        (r"\it", r"\mathit"),
+        (r"\bf", r"\mathbf"),
+    ]
+    
+    for old, new in replacements:
+        text = replace_command(text, old, new)
+
+    text = text.replace("~", r"\quad")
+    
+    # 额外修复：移除 \operatorname* 中的 * (如果未被上述规则捕获)
+    text = re.sub(r"\\operatorname\*\s*\{", r"\\operatorname{", text)
+    
+    # 修复：移除 \Im 和 \Re 前可能出现的错误竖线
+    text = re.sub(r"\|\s*\\Im", r"\\Im", text)
+    text = re.sub(r"\|\s*\\Re", r"\\Re", text)
+    
+    # 后处理：移除占位符
+    text = re.sub(r"\\(black)?square", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\\Box", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\\boxed\s*\{\s*\}", "", text)
+    text = re.sub(r"\\phantom\s*\{[^}]*\}", "", text)
+    
+    return text
+
 def safe_convert_mathml(latex: str) -> str:
     """安全地将 LaTeX 转换为 MathML."""
     if not latex or latex.startswith("⚠️") or latex.startswith("("):
         return ""
     try:
+        # 先标准化
+        latex = standardize_latex(latex)
         return latex2mathml.converter.convert(latex)
     except Exception as e:
         logger.warning(f"MathML conversion failed: {e}")
@@ -257,62 +337,6 @@ class TexoApp:
             # 3. 恢复保护的空格
             result = result.replace("_TEXO_SP_", " ")
             
-            # 后处理：标准化 LaTeX 命令 (修复 MathML 转换问题)
-            # 使用正则确保只替换完整的命令 (避免 \left 被替换为 \leqft)
-            def replace_command(text, old_cmd, new_cmd):
-                # 匹配 \old_cmd 且后面不跟字母
-                pattern = re.compile(re.escape(old_cmd) + r"(?![a-zA-Z])")
-                # 使用 lambda 避免 new_cmd 中的反斜杠被 re.sub 当作转义符处理
-                return pattern.sub(lambda m: new_cmd, text)
-
-            replacements = [
-                # 极限与算子
-                (r"\operatorname*{lim}", r"\lim"),
-                (r"\operatorname*{min}", r"\min"),
-                (r"\operatorname*{max}", r"\max"),
-                (r"\operatorname*{sup}", r"\sup"),
-                (r"\operatorname*{inf}", r"\inf"),
-                (r"\operatorname{lim}", r"\lim"),
-                (r"\operatorname{min}", r"\min"),
-                (r"\operatorname{max}", r"\max"),
-                (r"\operatorname{sup}", r"\sup"),
-                (r"\operatorname{inf}", r"\inf"),
-                
-                # 箭头与关系符
-                (r"\rarr", r"\to"),
-                (r"\infin", r"\infty"),
-                (r"\ge", r"\geq"),
-                (r"\le", r"\leq"),
-                (r"\gt", ">"),
-                (r"\lt", "<"),
-                
-                # 运算符号
-                (r"\cdotp", r"\cdot"),
-                (r"\lvert", "|"),
-                (r"\rvert", "|"),
-                (r"\lVert", "||"),
-                (r"\rVert", "||"),
-                
-                # 字体与修饰
-                (r"\Bbb", r"\mathbb"),
-                (r"\bold", r"\mathbf"),
-                (r"\rm", r"\mathrm"),
-                (r"\it", r"\mathit"),
-                (r"\bf", r"\mathbf"),
-            ]
-            
-            for old, new in replacements:
-                result = replace_command(result, old, new)
-            
-            # 额外修复：移除 \operatorname* 中的 * (如果未被上述规则捕获)
-            result = re.sub(r"\\operatorname\*\s*\{", r"\\operatorname{", result)
-            
-            # 后处理：移除占位符
-            result = re.sub(r"\\(black)?square", "", result, flags=re.IGNORECASE)
-            result = re.sub(r"\\Box", "", result, flags=re.IGNORECASE)
-            result = re.sub(r"\\boxed\s*\{\s*\}", "", result)
-            result = re.sub(r"\\phantom\s*\{[^}]*\}", "", result)
-            
             return result or "(未识别到内容)"
         except torch.cuda.OutOfMemoryError:
             torch.cuda.empty_cache()
@@ -347,7 +371,8 @@ def create_ui(app: TexoApp) -> gr.Blocks:
             
             with gr.Column():
                 out = gr.Textbox(label="LaTeX", lines=6, max_lines=6, show_copy_button=True, elem_classes=["output-box"], elem_id="latex-output", interactive=True, placeholder="识别结果...")
-                mathml_out = gr.Textbox(visible=True, elem_classes=["hidden-box"], elem_id="mathml-output")
+                conversion_result = gr.Textbox(label="转换结果", visible=True, lines=4, max_lines=4, show_copy_button=True, elem_id="conversion-result")
+                mathml_storage = gr.Textbox(elem_id="mathml-storage", elem_classes=["hidden-box"], visible=True)
                 
                 gr.HTML(elem_classes=["dropdown-container"], value="""
                 <div style="display: flex; gap: 10px; width: 100%;">
@@ -378,19 +403,20 @@ def create_ui(app: TexoApp) -> gr.Blocks:
         
         gr.HTML(f'<div class="footer">{logo_html(16)} <a href="https://github.com/alephpi/Texo">GitHub</a> · AlephPi</div>')
 
-        def recognize_and_convert(image) -> Tuple[str, str]:
+        def recognize_and_convert(image) -> Tuple[str, str, str]:
             latex = app.recognize(image)
             mathml = safe_convert_mathml(latex)
-            return latex, mathml
+            return latex, mathml, ""
 
-        def update_mathml(latex) -> str:
-            return safe_convert_mathml(latex)
+        def update_conversion_data(latex) -> Tuple[str, str]:
+            mathml = safe_convert_mathml(latex)
+            return mathml, ""
 
         # 事件绑定
-        btn.click(recognize_and_convert, img, [out, mathml_out])
-        img.change(recognize_and_convert, img, [out, mathml_out])
+        btn.click(recognize_and_convert, img, [out, mathml_storage, conversion_result])
+        img.change(recognize_and_convert, img, [out, mathml_storage, conversion_result])
         out.change(render_latex, out, preview)
-        out.change(update_mathml, out, mathml_out)
+        out.change(update_conversion_data, out, [mathml_storage, conversion_result])
 
     return demo
 
