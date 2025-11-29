@@ -258,18 +258,55 @@ class TexoApp:
             result = result.replace("_TEXO_SP_", " ")
             
             # 后处理：标准化 LaTeX 命令 (修复 MathML 转换问题)
-            replacements = {
-                r"\operatorname*{lim}": r"\lim",
-                r"\operatorname*{min}": r"\min",
-                r"\operatorname*{max}": r"\max",
-                r"\operatorname*{sup}": r"\sup",
-                r"\operatorname*{inf}": r"\inf",
-                r"\rarr": r"\to",
-                r"\infin": r"\infty",
-            }
-            for old, new in replacements.items():
-                result = result.replace(old, new)
-                        
+            # 使用正则确保只替换完整的命令 (避免 \left 被替换为 \leqft)
+            def replace_command(text, old_cmd, new_cmd):
+                # 匹配 \old_cmd 且后面不跟字母
+                pattern = re.compile(re.escape(old_cmd) + r"(?![a-zA-Z])")
+                # 使用 lambda 避免 new_cmd 中的反斜杠被 re.sub 当作转义符处理
+                return pattern.sub(lambda m: new_cmd, text)
+
+            replacements = [
+                # 极限与算子
+                (r"\operatorname*{lim}", r"\lim"),
+                (r"\operatorname*{min}", r"\min"),
+                (r"\operatorname*{max}", r"\max"),
+                (r"\operatorname*{sup}", r"\sup"),
+                (r"\operatorname*{inf}", r"\inf"),
+                (r"\operatorname{lim}", r"\lim"),
+                (r"\operatorname{min}", r"\min"),
+                (r"\operatorname{max}", r"\max"),
+                (r"\operatorname{sup}", r"\sup"),
+                (r"\operatorname{inf}", r"\inf"),
+                
+                # 箭头与关系符
+                (r"\rarr", r"\to"),
+                (r"\infin", r"\infty"),
+                (r"\ge", r"\geq"),
+                (r"\le", r"\leq"),
+                (r"\gt", ">"),
+                (r"\lt", "<"),
+                
+                # 运算符号
+                (r"\cdotp", r"\cdot"),
+                (r"\lvert", "|"),
+                (r"\rvert", "|"),
+                (r"\lVert", "||"),
+                (r"\rVert", "||"),
+                
+                # 字体与修饰
+                (r"\Bbb", r"\mathbb"),
+                (r"\bold", r"\mathbf"),
+                (r"\rm", r"\mathrm"),
+                (r"\it", r"\mathit"),
+                (r"\bf", r"\mathbf"),
+            ]
+            
+            for old, new in replacements:
+                result = replace_command(result, old, new)
+            
+            # 额外修复：移除 \operatorname* 中的 * (如果未被上述规则捕获)
+            result = re.sub(r"\\operatorname\*\s*\{", r"\\operatorname{", result)
+            
             # 后处理：移除占位符
             result = re.sub(r"\\(black)?square", "", result, flags=re.IGNORECASE)
             result = re.sub(r"\\Box", "", result, flags=re.IGNORECASE)
