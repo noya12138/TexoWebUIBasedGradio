@@ -257,6 +257,19 @@ class TexoApp:
             # 3. 恢复保护的空格
             result = result.replace("_TEXO_SP_", " ")
             
+            # 后处理：标准化 LaTeX 命令 (修复 MathML 转换问题)
+            replacements = {
+                r"\operatorname*{lim}": r"\lim",
+                r"\operatorname*{min}": r"\min",
+                r"\operatorname*{max}": r"\max",
+                r"\operatorname*{sup}": r"\sup",
+                r"\operatorname*{inf}": r"\inf",
+                r"\rarr": r"\to",
+                r"\infin": r"\infty",
+            }
+            for old, new in replacements.items():
+                result = result.replace(old, new)
+                        
             # 后处理：移除占位符
             result = re.sub(r"\\(black)?square", "", result, flags=re.IGNORECASE)
             result = re.sub(r"\\Box", "", result, flags=re.IGNORECASE)
