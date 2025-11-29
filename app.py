@@ -3,6 +3,7 @@ import atexit
 import base64
 import logging
 import os
+import re
 import sys
 import time
 from functools import lru_cache
@@ -14,6 +15,7 @@ os.environ.setdefault("NUMEXPR_MAX_THREADS", "16")
 
 import gradio as gr
 import torch
+import latex2mathml.converter
 from PIL import Image
 from transformers import AutoTokenizer, VisionEncoderDecoderModel
 
@@ -40,7 +42,6 @@ class _AsyncioFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         msg = record.getMessage()
         return not any(x in msg for x in ("ConnectionResetError", "_call_connection_lost", "WinError"))
-
 
 logging.getLogger("asyncio").addFilter(_AsyncioFilter())
 
@@ -132,6 +133,13 @@ class TexoApp:
             with torch.no_grad():
                 out = self.model.generate(pixel_values=x)
             result = self.tokenizer.batch_decode(out, skip_special_tokens=True)[0].strip()  # type: ignore
+            logger.info(f"Raw recognition result: {result!r}")
+            # Post-processing: remove placeholder artifacts
+            # Remove \square, \blacksquare, \Box, \phantom{}, empty \boxed{}
+            result = re.sub(r"\\(black)?square", "", result, flags=re.IGNORECASE)
+            result = re.sub(r"\\Box", "", result, flags=re.IGNORECASE)
+            result = re.sub(r"\\boxed\s*\{\s*\}", "", result)
+            result = re.sub(r"\\phantom\s*\{[^}]*\}", "", result)
             return result or "(未识别到内容)"
         except torch.cuda.OutOfMemoryError:
             torch.cuda.empty_cache()
@@ -166,11 +174,60 @@ def create_ui(app: TexoApp) -> gr.Blocks:
                 gr.Examples([[p] for p in EXAMPLE_IMAGES], inputs=img, label="示例")
             with gr.Column():
                 out = gr.Textbox(label="LaTeX", lines=6, max_lines=6, show_copy_button=True, elem_classes=["output-box"], interactive=True, placeholder="识别结果...")
+                mathml_out = gr.Textbox(visible=False)
+                copy_word_btn = gr.Button("复制到 Word", size="sm")
                 preview = gr.Markdown(elem_classes=["preview-box"])
         gr.HTML(f'<div class="footer">{logo_html(16)} <a href="https://github.com/alephpi/Texo">GitHub</a> · AlephPi</div>')
-        btn.click(app.recognize, img, out)
-        img.change(app.recognize, img, out)
+
+        def recognize_and_convert(image):
+            latex = app.recognize(image)
+            mathml = ""
+            try:
+                if latex and not latex.startswith("⚠️") and not latex.startswith("("):
+                    mathml = latex2mathml.converter.convert(latex)
+                    # Fix for Word: Convert Sum/Prod operators to identifiers to avoid empty dashed boxes
+                    mathml = re.sub(r"<mo>(\s*(&#x02211;|&#8721;|∑)\s*)</mo>", r"<mi>\1</mi>", mathml)
+                    mathml = re.sub(r"<mo>(\s*(&#x0220F;|&#8719;|∏)\s*)</mo>", r"<mi>\1</mi>", mathml)
+            except Exception as e:
+                logger.warning(f"MathML conversion failed: {e}")
+            return latex, mathml
+
+        def update_mathml(latex):
+            try:
+                if latex and not latex.startswith("⚠️") and not latex.startswith("("):
+                    mathml = latex2mathml.converter.convert(latex)
+                    # Fix for Word: Convert Sum/Prod operators to identifiers to avoid empty dashed boxes
+                    # Word treats <mo>∑</mo> as an N-ary operator expecting a summand argument.
+                    # If the summand isn't grouped in the MathML (which latex2mathml doesn't do),
+                    # Word shows an empty placeholder. Changing to <mi> makes it a simple symbol.
+                    mathml = re.sub(r"<mo>(\s*(&#x02211;|&#8721;|∑)\s*)</mo>", r"<mi>\1</mi>", mathml)
+                    mathml = re.sub(r"<mo>(\s*(&#x0220F;|&#8719;|∏)\s*)</mo>", r"<mi>\1</mi>", mathml)
+                    return mathml
+            except Exception:
+                pass
+            return ""
+
+        btn.click(recognize_and_convert, img, [out, mathml_out])
+        img.change(recognize_and_convert, img, [out, mathml_out])
         out.change(render_latex, out, preview)
+        out.change(update_mathml, out, mathml_out)
+
+        js_copy = """
+        (mathml) => {
+            if (!mathml) {
+                alert("没有可复制的内容");
+                return;
+            }
+            const blob = new Blob([mathml], {type: 'text/html'});
+            const item = new ClipboardItem({'text/html': blob});
+            navigator.clipboard.write([item]).then(
+                () => { alert("已复制 MathML，请在 Word 中直接粘贴"); },
+                (err) => { console.error("Failed to copy: ", err); alert("复制失败: " + err); }
+            );
+        }
+        """
+        copy_word_btn.click(None, mathml_out, None, js=js_copy)
+
     return demo
 
 
