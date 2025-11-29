@@ -8,7 +8,7 @@ import sys
 import time
 from functools import lru_cache
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 os.environ.setdefault("NUMEXPR_MAX_THREADS", "16")
@@ -19,8 +19,15 @@ import latex2mathml.converter
 from PIL import Image
 from transformers import AutoTokenizer, VisionEncoderDecoderModel
 
+# Register custom model architecture
+try:
+    import texo.utils.config
+except ImportError:
+    # If src is not in path, try adding it
+    sys.path.append(str(Path(__file__).parent / "src"))
+    import texo.utils.config
+
 from texo.data.processor import EvalMERImageProcessor
-from texo.utils.config import AutoConfig, AutoModel, HGNetv2, HGNetv2Config  # noqa: F401
 
 # 配置
 MODEL_PATH = Path("./model")
@@ -33,11 +40,10 @@ EXAMPLE_IMAGES = [
     "./TechnoSelection/test_img/多行公式2.jpg",
 ]
 
-# 日志
+# 日志配置
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-# 过滤 Windows asyncio 噪音日志
 class _AsyncioFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         msg = record.getMessage()
@@ -55,22 +61,130 @@ CSS = """
 .preview-box { min-height: 150px !important; max-height: 300px !important; overflow-y: auto !important; padding: 1rem !important; border: 1px solid #e0e0e0 !important; border-radius: 8px !important; }
 .footer { text-align: center; padding: 1rem; color: #888; font-size: 0.9rem; }
 .footer a { color: #2563EB; }
+
+/* Toast Notification */
+.toast-container { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); z-index: 9999; pointer-events: none; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.toast { background: linear-gradient(135deg, #FF512F, #DD2476); color: #fff; padding: 12px 24px; border-radius: 6px; opacity: 0; transition: opacity 0.3s ease-in-out; box-shadow: 0 4px 12px rgba(0,0,0,0.2); font-size: 14px; text-align: center; font-weight: 500; }
+.toast.show { opacity: 1; }
+
+/* Custom Dropdown */
+.custom-dropdown { position: relative; display: inline-block; width: 100%; font-family: "Source Sans Pro", ui-sans-serif, system-ui, sans-serif; }
+.custom-dropdown::after { content: ""; position: absolute; left: 0; right: 0; bottom: -20px; height: 20px; background: transparent; }
+.custom-dropbtn { background-color: white; color: #374151; padding: 10px 12px; font-size: 14px; border: 1px solid #e5e7eb; border-radius: 8px; cursor: pointer; width: 100%; text-align: left; display: flex; justify-content: space-between; align-items: center; transition: border-color 0.2s; }
+.custom-dropdown:hover .custom-dropbtn { border-color: #f97316; }
+.custom-dropdown-content { display: none; position: absolute; background-color: white; min-width: 100%; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05); z-index: 9999; border-radius: 8px; border: 1px solid #e5e7eb; overflow: hidden; margin-top: 4px; }
+.custom-dropdown:hover .custom-dropdown-content { display: block; }
+.custom-dropdown-content div { color: #374151; padding: 8px 12px; text-decoration: none; display: block; cursor: pointer; font-size: 14px; }
+.custom-dropdown-content div:hover { background-color: #f3f4f6; color: #f97316; }
+.hidden-box { display: none !important; }
+.dropdown-container { overflow: visible !important; position: relative; z-index: 100; }
 """
 
+TOAST_JS = """
+<script>
+function showToast(message) {
+    let container = document.getElementById('toast-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'toast-container';
+        container.className = 'toast-container';
+        document.body.appendChild(container);
+    }
+    const toast = document.createElement('div');
+    toast.className = 'toast';
+    toast.textContent = message;
+    container.appendChild(toast);
+    
+    // Force reflow
+    void toast.offsetWidth;
+    
+    toast.classList.add('show');
+    
+    setTimeout(() => {
+        toast.classList.remove('show');
+        setTimeout(() => {
+            if (container.contains(toast)) {
+                container.removeChild(toast);
+            }
+        }, 300);
+    }, 3000);
+}
+
+function getElementValue(id) {
+    const el = document.querySelector(`#${id} textarea`);
+    return el ? el.value : "";
+}
+
+function copyLatex(format) {
+    const latex = getElementValue('latex-output');
+    if (!latex) { showToast("没有可复制的内容"); return; }
+    
+    let text = latex;
+    const formats = {
+        "raw": latex,
+        "$": "$" + latex + "$",
+        "$$": "$$" + latex + "$$",
+        "\\[": "\\\\[" + latex + "\\\\]",
+        "\\(": "\\\\(" + latex + "\\\\)",
+        "equation": "\\\\begin{equation}\\n" + latex + "\\n\\\\end{equation}"
+    };
+    if (formats[format]) text = formats[format];
+    
+    navigator.clipboard.writeText(text).then(
+        () => { showToast("已复制 LaTeX"); },
+        (err) => { showToast("复制失败: " + err); }
+    );
+}
+
+function copyMathML(action) {
+    if (action === "word") {
+        const mathml = getElementValue('mathml-output');
+        if (!mathml) { showToast("没有可复制的内容"); return; }
+        const blob = new Blob([mathml], {type: 'text/html'});
+        const item = new ClipboardItem({'text/html': blob});
+        navigator.clipboard.write([item]).then(
+            () => { showToast("已复制 MathML，请在 Word 中直接粘贴"); },
+            (err) => { showToast("复制失败: " + err); }
+        );
+    } else if (action === "ascii") {
+        showToast("暂不支持 AsciiMath");
+    } else if (action === "typst") {
+        showToast("暂不支持 Typst");
+    } else if (action === "docx") {
+        showToast("请先安装 python-docx 库以支持导出功能");
+    }
+}
+</script>
+"""
 
 @lru_cache(maxsize=1)
 def read_logo() -> str:
+    if not LOGO_PATH.exists():
+        return ""
     return LOGO_PATH.read_text(encoding="utf-8")
 
-
 def logo_html(size: int) -> str:
-    svg = read_logo().replace("<svg ", '<svg width="100%" height="100%" ', 1)
+    svg = read_logo()
+    if not svg:
+        return ""
+    svg = svg.replace("<svg ", '<svg width="100%" height="100%" ', 1)
     return f'<span style="display:inline-block;width:{size}px;height:{size}px;vertical-align:middle;">{svg}</span>'
 
-
 def favicon() -> str:
-    return f'<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,{base64.b64encode(read_logo().encode()).decode()}">'
+    svg = read_logo()
+    if not svg:
+        return ""
+    return f'<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,{base64.b64encode(svg.encode()).decode()}">'
 
+def safe_convert_mathml(latex: str) -> str:
+    """安全地将 LaTeX 转换为 MathML."""
+    if not latex or latex.startswith("⚠️") or latex.startswith("("):
+        return ""
+    try:
+        return latex2mathml.converter.convert(latex)
+    except Exception as e:
+        logger.warning(f"MathML conversion failed: {e}")
+        return ""
 
 class TexoApp:
     """LaTeX OCR 应用."""
@@ -118,28 +232,37 @@ class TexoApp:
         if not image:
             return ""
         try:
-            # 转 RGB
+            # 图像预处理：处理透明背景并转换为 RGB
             if image.mode != "RGB":
                 bg = Image.new("RGB", image.size, (255, 255, 255))
-                if image.mode in ("RGBA", "LA", "P"):
-                    if image.mode == "P":
-                        image = image.convert("RGBA")
-                    bg.paste(image, mask=image.split()[-1] if image.mode in ("RGBA", "LA") else None)
+                if image.mode in ("RGBA", "LA") or (image.mode == "P" and "transparency" in image.info):
+                    image = image.convert("RGBA")
+                    bg.paste(image, mask=image.split()[-1])
                     image = bg
                 else:
                     image = image.convert("RGB")
+            
             # 推理
             x = self.processor(image).unsqueeze(0).to(self.device)  # type: ignore
             with torch.no_grad():
                 out = self.model.generate(pixel_values=x)
+            
             result = self.tokenizer.batch_decode(out, skip_special_tokens=True)[0].strip()  # type: ignore
-            logger.info(f"Raw recognition result: {result!r}")
-            # Post-processing: remove placeholder artifacts
-            # Remove \square, \blacksquare, \Box, \phantom{}, empty \boxed{}
+            
+            # 后处理：清理多余空格
+            # 1. 保护 "\command letter" 格式的空格 (如 \sin x, \hat a)
+            result = re.sub(r"(\\[a-zA-Z]+)\s+([a-zA-Z])", r"\1_TEXO_SP_\2", result)
+            # 2. 移除所有其他空格
+            result = result.replace(" ", "")
+            # 3. 恢复保护的空格
+            result = result.replace("_TEXO_SP_", " ")
+            
+            # 后处理：移除占位符
             result = re.sub(r"\\(black)?square", "", result, flags=re.IGNORECASE)
             result = re.sub(r"\\Box", "", result, flags=re.IGNORECASE)
             result = re.sub(r"\\boxed\s*\{\s*\}", "", result)
             result = re.sub(r"\\phantom\s*\{[^}]*\}", "", result)
+            
             return result or "(未识别到内容)"
         except torch.cuda.OutOfMemoryError:
             torch.cuda.empty_cache()
@@ -157,111 +280,67 @@ class TexoApp:
             name += f": {torch.cuda.get_device_name(0)}"
         return f"就绪 ({name})"
 
-
 def render_latex(latex: str) -> str:
     if not latex or latex.startswith("⚠️") or latex.startswith("("):
         return f"*{latex}*" if latex else ""
     return f"$$\n{latex.strip()}\n$$"
 
-
 def create_ui(app: TexoApp) -> gr.Blocks:
-    with gr.Blocks(title="Texo", css=CSS, head=favicon()) as demo:
+    with gr.Blocks(title="Texo", css=CSS, head=favicon() + TOAST_JS) as demo:
         gr.HTML(f'<div class="header"><div class="header-title">{logo_html(40)}<h1>Texo</h1></div><p>轻量级 LaTeX OCR · {app.status}</p></div>')
+        
         with gr.Row():
             with gr.Column():
                 img = gr.Image(label="上传图片", type="pil", height=300, sources=["upload", "clipboard"])
                 btn = gr.Button("识别", variant="primary", size="lg", icon=str(LOGO_PATH))
                 gr.Examples([[p] for p in EXAMPLE_IMAGES], inputs=img, label="示例")
+            
             with gr.Column():
-                out = gr.Textbox(label="LaTeX", lines=6, max_lines=6, show_copy_button=True, elem_classes=["output-box"], interactive=True, placeholder="识别结果...")
-                mathml_out = gr.Textbox(visible=False)
-                with gr.Row():
-                    copy_latex_dd = gr.Dropdown(
-                        choices=["无特殊附加", "$ ... $ 格式", "$$ ... $$ 格式", r"\[ ... \] 格式", r"\( ... \) 格式", r"\begin{equation} ... \end{equation} 格式"],
-                        label="复制LaTeX",
-                        value=None,
-                        interactive=True,
-                        show_label=True,
-                        scale=1
-                    )
-                    copy_mathml_dd = gr.Dropdown(
-                        choices=["复制MathML(Word)", "复制AsciiMath", "复制Typst", "导出Docx(Word/WPS)"],
-                        label="复制MathML(Word)",
-                        value=None,
-                        interactive=True,
-                        show_label=True,
-                        scale=1
-                    )
+                out = gr.Textbox(label="LaTeX", lines=6, max_lines=6, show_copy_button=True, elem_classes=["output-box"], elem_id="latex-output", interactive=True, placeholder="识别结果...")
+                mathml_out = gr.Textbox(visible=True, elem_classes=["hidden-box"], elem_id="mathml-output")
+                
+                gr.HTML(elem_classes=["dropdown-container"], value="""
+                <div style="display: flex; gap: 10px; width: 100%;">
+                    <div class="custom-dropdown">
+                        <div class="custom-dropbtn">复制 LaTeX <span style="font-size: 10px;">▼</span></div>
+                        <div class="custom-dropdown-content">
+                            <div onclick="copyLatex('raw')">无特殊附加</div>
+                            <div onclick="copyLatex('$')">$ ... $ 格式</div>
+                            <div onclick="copyLatex('$$')">$$ ... $$ 格式</div>
+                            <div onclick="copyLatex('\\[')">\\[ ... \\] 格式</div>
+                            <div onclick="copyLatex('\\(')">\\( ... \\) 格式</div>
+                            <div onclick="copyLatex('equation')">\\begin{equation} ... \\end{equation} 格式</div>
+                        </div>
+                    </div>
+                    <div class="custom-dropdown">
+                        <div class="custom-dropbtn">复制 MathML <span style="font-size: 10px;">▼</span></div>
+                        <div class="custom-dropdown-content">
+                            <div onclick="copyMathML('word')">复制MathML(Word)</div>
+                            <div onclick="copyMathML('ascii')">复制AsciiMath</div>
+                            <div onclick="copyMathML('typst')">复制Typst</div>
+                            <div onclick="copyMathML('docx')">导出Docx(Word/WPS)</div>
+                        </div>
+                    </div>
+                </div>
+                """)
+                
                 preview = gr.Markdown(elem_classes=["preview-box"])
+        
         gr.HTML(f'<div class="footer">{logo_html(16)} <a href="https://github.com/alephpi/Texo">GitHub</a> · AlephPi</div>')
 
-        def recognize_and_convert(image):
+        def recognize_and_convert(image) -> Tuple[str, str]:
             latex = app.recognize(image)
-            mathml = ""
-            try:
-                if latex and not latex.startswith("⚠️") and not latex.startswith("("):
-                    mathml = latex2mathml.converter.convert(latex)
-            except Exception as e:
-                logger.warning(f"MathML conversion failed: {e}")
+            mathml = safe_convert_mathml(latex)
             return latex, mathml
 
-        def update_mathml(latex):
-            try:
-                if latex and not latex.startswith("⚠️") and not latex.startswith("("):
-                    mathml = latex2mathml.converter.convert(latex)
-                    return mathml
-            except Exception:
-                pass
-            return ""
+        def update_mathml(latex) -> str:
+            return safe_convert_mathml(latex)
 
+        # 事件绑定
         btn.click(recognize_and_convert, img, [out, mathml_out])
         img.change(recognize_and_convert, img, [out, mathml_out])
         out.change(render_latex, out, preview)
         out.change(update_mathml, out, mathml_out)
-
-        js_copy_latex = r"""
-        (format, latex) => {
-            if (!format) return null;
-            if (!latex) { alert("没有可复制的内容"); return null; }
-            let text = latex;
-            if (format === "$ ... $ 格式") text = "$" + latex + "$";
-            else if (format === "$$ ... $$ 格式") text = "$$" + latex + "$$";
-            else if (format === "\\[ ... \\] 格式") text = "\\[" + latex + "\\]";
-            else if (format === "\\( ... \\) 格式") text = "\\(" + latex + "\\)";
-            else if (format === "\\begin{equation} ... \\end{equation} 格式") text = "\\begin{equation}\n" + latex + "\n\\end{equation}";
-            
-            navigator.clipboard.writeText(text).then(
-                () => { alert("已复制 LaTeX"); },
-                (err) => { alert("复制失败: " + err); }
-            );
-            return null;
-        }
-        """
-        
-        js_copy_mathml = r"""
-        (action, mathml) => {
-            if (!action) return null;
-            if (action === "复制MathML(Word)") {
-                if (!mathml) { alert("没有可复制的内容"); return null; }
-                const blob = new Blob([mathml], {type: 'text/html'});
-                const item = new ClipboardItem({'text/html': blob});
-                navigator.clipboard.write([item]).then(
-                    () => { alert("已复制 MathML，请在 Word 中直接粘贴"); },
-                    (err) => { alert("复制失败: " + err); }
-                );
-            } else if (action === "复制AsciiMath") {
-                alert("暂不支持 AsciiMath");
-            } else if (action === "复制Typst") {
-                alert("暂不支持 Typst");
-            } else if (action === "导出Docx(Word/WPS)") {
-                alert("请先安装 python-docx 库以支持导出功能");
-            }
-            return null;
-        }
-        """
-        
-        copy_latex_dd.change(None, [copy_latex_dd, out], copy_latex_dd, js=js_copy_latex)
-        copy_mathml_dd.change(None, [copy_mathml_dd, mathml_out], copy_mathml_dd, js=js_copy_mathml)
 
     return demo
 
@@ -278,7 +357,6 @@ def main() -> None:
     except Exception as e:
         logger.exception("错误: %s", e)
         sys.exit(1)
-
 
 if __name__ == "__main__":
     main()
