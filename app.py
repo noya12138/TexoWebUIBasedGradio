@@ -238,19 +238,12 @@ def standardize_latex(text: str) -> str:
         text = replace_command(text, old, new)
 
     text = text.replace("~", r"\quad")
+
+    # 优化：将 \overline 替换为 \bar 以获得更好的 MathML 兼容性 (Word 中 \overline 可能显示异常)
+    text = text.replace(r"\overline", r"\bar")
     
     # 额外修复：移除 \operatorname* 中的 * (如果未被上述规则捕获)
     text = re.sub(r"\\operatorname\*\s*\{", r"\\operatorname{", text)
-    
-    # 修复：移除 \Im 和 \Re 前可能出现的错误竖线
-    text = re.sub(r"\|\s*\\Im", r"\\Im", text)
-    text = re.sub(r"\|\s*\\Re", r"\\Re", text)
-    
-    # 后处理：移除占位符
-    text = re.sub(r"\\(black)?square", "", text, flags=re.IGNORECASE)
-    text = re.sub(r"\\Box", "", text, flags=re.IGNORECASE)
-    text = re.sub(r"\\boxed\s*\{\s*\}", "", text)
-    text = re.sub(r"\\phantom\s*\{[^}]*\}", "", text)
     
     return text
 
@@ -371,7 +364,7 @@ def create_ui(app: TexoApp) -> gr.Blocks:
             
             with gr.Column():
                 out = gr.Textbox(label="LaTeX", lines=6, max_lines=6, show_copy_button=True, elem_classes=["output-box"], elem_id="latex-output", interactive=True, placeholder="识别结果...")
-                conversion_result = gr.Textbox(label="转换结果", visible=True, lines=4, max_lines=4, show_copy_button=True, elem_id="conversion-result")
+                conversion_result = gr.Textbox(label="转换结果", visible=True, lines=6, max_lines=6, show_copy_button=True, elem_id="conversion-result")
                 mathml_storage = gr.Textbox(elem_id="mathml-storage", elem_classes=["hidden-box"], visible=True)
                 
                 gr.HTML(elem_classes=["dropdown-container"], value="""
