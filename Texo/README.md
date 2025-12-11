@@ -22,6 +22,11 @@ Texo is pronounced as /ˈtɛːkoʊ/
 - Well organized code as a tutorial.
 - [Running in browser!](https://github.com/alephpi/Texo-web)
 
+>[!Note]
+> Feel honored been collected in [@ruanyf's weekly](https://www.ruanyifeng.com/blog/2025/11/weekly-issue-372.html), if you are a user from there, and have an issue on visit the website, please leave a message in [Texo-web](https://github.com/alephpi/Texo-web) repo. Due to my limited front-end skills, please contribute to help me in any form.
+> 
+> 很荣幸被 [《阮一峰的科技周刊》](https://www.ruanyifeng.com/blog/2025/11/weekly-issue-372.html) 收录，如果你从那里过来，并且在访问 demo 网站时出现 bug，请移步至 [Texo-web](https://github.com/alephpi/Texo-web) 仓库报告。由于我前端水平有限，欢迎各位不吝赐教。
+
 ## Prelude
 Despite a growing number of STEM and AI learners with their note-taking needs today, a free, fast, more accessible yet precise LaTeX OCR tool is still absent. Lying exactly in the comfort zone of machine learning due to the closed vocabulary and less generalization requirements, such classical pattern recognition task can be considered as solved thanks to recent deep learning progress(TrOCR, GOT-2.0, UniMERNet, PPFormulaNet). So here comes the Texo, which tackles this problem in the scope of a personal project.
 
@@ -71,6 +76,75 @@ python scripts/python/hf_hub.py pull
 python scripts/python/hf_hub.py pull --with_useful_ckpts
 ```
 
+## Inference
+Check [`demo.ipynb`](./demo.ipynb)
+
+## Training
+
+### Requirements
+- Mine: 50G CPU memory, A40/L40S 46G.
+- Recommend: 50G CPU memory, 40G GPU memory.
+- Minimal: 20G CPU memory(with streaming dataloading) and 16G GPU memory(with accumulative gradient).
+
+### Download dataset (UniMER-1M)
+Following https://huggingface.co/datasets/wanderkid/UniMER_Dataset as what I've done
+
+If you are lazy, use the one that I arranged and normalized.
+- https://huggingface.co/datasets/alephpi/UniMER-Train
+- https://huggingface.co/datasets/alephpi/UniMER-Test
+
+If you are interested in all the preprocessings, check [here](./data/tokenizer) and [here](./scripts/python/normalize.py), where I collected and sorted all the useful KaTeX commands.
+
+### Launch
+We use `hydra` to manage training configurations and experiments.
+
+```sh
+# train
+python src/train.py
+```
+```sh
+# resume from a checkpoint
+python src/train.py training.resume_from_ckpt="<ckpt_path>"
+```
+```sh
+# debug
+python src/train.py --config-dir="./config" --config-name="train_debug.yaml"
+```
+```sh
+# train on a slurm cluster
+python src/train.py --multirun --config-dir="./config" --config-name="train_slurm.yaml"
+```
+See other training configurations in [config](./config/) directory.
+
+### Log
+The training results are stored in [outputs](./outputs) directiory. To visualize it, run
+
+```sh
+tensorboard --logdir outputs
+```
+
+### Figures
+Some beautiful loss curves to give you an impression of the loss scale and the convergence process.
+
+#### Training loss
+<img src="./assets/train_loss.png">
+
+#### Validation loss
+<img src="./assets/val_loss.png">
+
+#### BLEU
+<img src="./assets/BLEU.png">
+
+#### Edit distance
+<img src="./assets/edit_distance.png">
+
+#### Learning rate
+<img src="./assets/learning_rate.png">
+
+## Reproduce the whole work
+
+If you want to start from scratch, check my [notes](./TechnoSelection/notes.md)
+
 ## Acknowledgements
 
 - [transformers](https://github.com/huggingface/transformers): framework, model decoder, tokenizer
@@ -88,3 +162,7 @@ python scripts/python/hf_hub.py pull --with_useful_ckpts
 [AGPL-3.0](https://www.gnu.org/licenses/agpl-3.0.html)
 
 Copyright (C) 2025-present Sicheng Mao <maosicheng98@gmail.com>
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=alephpi/Texo&type=date&legend=top-left)](https://www.star-history.com/#alephpi/Texo&type=date&legend=top-left)
