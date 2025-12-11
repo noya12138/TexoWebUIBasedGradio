@@ -1,6 +1,6 @@
 <p align="center" style="margin-bottom: 0">
-  <img src="./assets/svg/logo-text.svg#gh-light-mode-only" alt="Texo Logo" width="300"/>
-  <img src="./assets/svg/logo-text-dark.svg#gh-dark-mode-only" alt="Texo Logo" width="300"/>
+  <img src="./Texo/assets/svg/logo-text.svg#gh-light-mode-only" alt="Texo Logo" width="300"/>
+  <img src="./Texo/assets/svg/logo-text-dark.svg#gh-dark-mode-only" alt="Texo Logo" width="300"/>
 </p>
 <p align="center" style="font-size: 0.9em">
 Texo is pronounced as /ˈtɛːkoʊ/
@@ -50,7 +50,7 @@ We only list the lightweight version for the SOTA models, as we can see in terms
 > 
 > &dagger;: Copy from the paper
 > 
-> *: Texo-distill uses the same tokenizer as UniMERNet and PPFormulaNet, hence the sequential metrics are strictly comparable. While Texo-transfer uses a customized tokenizer hence the metrics are not comparable (we have a shorter sequence length, see more in [notes](./TechnoSelection/notes.md)). Of course a more fair evaluation metric for LaTeX-OCR should be the [CDM](http://arxiv.org/abs/2409.03643), but I'm lazy to do it due to its implementation complexity.
+> *: Texo-distill uses the same tokenizer as UniMERNet and PPFormulaNet, hence the sequential metrics are strictly comparable. While Texo-transfer uses a customized tokenizer hence the metrics are not comparable (we have a shorter sequence length, see more in [notes](./Texo/TechnoSelection/notes.md)). Of course a more fair evaluation metric for LaTeX-OCR should be the [CDM](http://arxiv.org/abs/2409.03643), but I'm lazy to do it due to its implementation complexity.
 > 
 > **: Slightly less than Texo-distill as the tokenizer's vocab is smaller.
 
