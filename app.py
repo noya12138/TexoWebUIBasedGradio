@@ -22,7 +22,8 @@ from transformers import AutoTokenizer, VisionEncoderDecoderModel
 
 # --- Path Setup ---
 PROJECT_ROOT = Path(__file__).parent
-SRC_PATH = PROJECT_ROOT / "src"
+TEXO_ROOT = PROJECT_ROOT / "Texo"
+SRC_PATH = TEXO_ROOT / "src"
 if str(SRC_PATH) not in sys.path:
     sys.path.append(str(SRC_PATH))
 
@@ -35,16 +36,16 @@ except ImportError as e:
     sys.exit(1)
 
 # --- Configuration & Constants ---
-DEFAULT_MODEL_DIR = Path("./model")
-ASSETS_DIR = Path("assets")
+DEFAULT_MODEL_DIR = TEXO_ROOT / "model"
+ASSETS_DIR = TEXO_ROOT / "assets"
 LOGO_FILE = ASSETS_DIR / "svg" / "logo.svg"
 IMAGE_SIZE = {"width": 384, "height": 384}
 
 EXAMPLE_IMAGES = [
-    "./TechnoSelection/test_img/单行公式.png",
-    "./TechnoSelection/test_img/单行公式2.png",
-    "./TechnoSelection/test_img/多行公式.png",
-    "./TechnoSelection/test_img/多行公式2.jpg",
+    str(TEXO_ROOT / "TechnoSelection" / "test_img" / "单行公式.png"),
+    str(TEXO_ROOT / "TechnoSelection" / "test_img" / "单行公式2.png"),
+    str(TEXO_ROOT / "TechnoSelection" / "test_img" / "多行公式.png"),
+    str(TEXO_ROOT / "TechnoSelection" / "test_img" / "多行公式2.jpg"),
 ]
 
 # LaTeX to MathML replacements
@@ -517,7 +518,13 @@ def main() -> None:
         
     try:
         ui = build_ui(model_wrapper)
-        ui.launch(server_name="127.0.0.1", server_port=7860, inbrowser=True, show_error=True)
+        ui.launch(
+            server_name="127.0.0.1",
+            server_port=7860,
+            inbrowser=True,
+            show_error=True,
+            share=False
+        )
     except KeyboardInterrupt:
         logger.info("Exiting...")
     except Exception as e:
